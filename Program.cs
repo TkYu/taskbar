@@ -38,7 +38,7 @@ Example: taskbar.exe D:\tools\ss-local.exe -c D:\tools\ss-config.json", "Usage",
             var selfPath = new Uri(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase).LocalPath;
             var dir = (exe.Contains("\\") ? Path.GetDirectoryName(exe) : Path.GetDirectoryName(selfPath))??Environment.CurrentDirectory;
             var logFile = Path.Combine(Path.GetTempPath(),$"taskbar_{Path.GetFileNameWithoutExtension(exe)}.out.log");
-            //var errFile = Path.Combine(Path.GetTempPath(), $"taskbar_{Path.GetFileNameWithoutExtension(exe)}.err.log");
+            var errFile = Path.Combine(Path.GetTempPath(), $"taskbar_{Path.GetFileNameWithoutExtension(exe)}.err.log");
             _process = new Process
             {
                 StartInfo =
@@ -49,7 +49,7 @@ Example: taskbar.exe D:\tools\ss-local.exe -c D:\tools\ss-config.json", "Usage",
                     WindowStyle = ProcessWindowStyle.Hidden,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    //RedirectStandardError = true,
+                    RedirectStandardError = true,
                     CreateNoWindow = true
                 }
             };
@@ -64,28 +64,39 @@ Example: taskbar.exe D:\tools\ss-local.exe -c D:\tools\ss-config.json", "Usage",
                 using var sro = _process.StandardOutput;
                 while (!cts.IsCancellationRequested)
                 {
-                    string textLine = sro.ReadLine();
-
+                    var textLine = sro.ReadLine();
                     if (textLine == null)
                         break;
-
+                    sw.WriteLine(textLine);
+                }
+            }, cts.Token);
+            Task.Run(() =>
+            {
+                using var fs = new FileStream(errFile, FileMode.Append);
+                using var sw = new StreamWriter(fs) { AutoFlush = true };
+                using var sre = _process.StandardError;
+                while (!cts.IsCancellationRequested)
+                {
+                    var textLine = sre.ReadLine();
+                    if (textLine == null)
+                        break;
                     sw.WriteLine(textLine);
                 }
             }, cts.Token);
 
-
             _notifyIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(selfPath);
             _notifyIcon.Visible = true;
-            _notifyIcon.Text = Application.ProductName;
+            //_notifyIcon.Text = Application.ProductName;
+            _notifyIcon.Text = Path.GetFileNameWithoutExtension(exe);
 
             var contextMenu = new ContextMenuStrip();
             frmLogs formLog = null;
-            var itemShowlog = contextMenu.Items.Add("Show Log", null, (s, e) =>
+            contextMenu.Items.Add("Show Output Log", null, (s, e) =>
             {
                 if(formLog == null)
                 {
                     formLog = new frmLogs(logFile);
-                    formLog.ShowDialog();
+                    formLog?.ShowDialog();
                     formLog = null;
                 }
                 else
@@ -93,7 +104,20 @@ Example: taskbar.exe D:\tools\ss-local.exe -c D:\tools\ss-config.json", "Usage",
                     formLog.Activate();
                 }
             });
-            var itemRunStart = contextMenu.Items.Add("RunAtStart", null, (s, e) =>
+            var itemShowErr = contextMenu.Items.Add("Show Error Log", null, (s, e) =>
+            {
+                if (formLog == null)
+                {
+                    formLog = new frmLogs(errFile);
+                    formLog?.ShowDialog();
+                    formLog = null;
+                }
+                else
+                {
+                    formLog.Activate();
+                }
+            });
+            var itemRunStart = contextMenu.Items.Add("Run At Start", null, (s, e) =>
             {
                 var item = (ToolStripMenuItem) s;
                 SetStartup(!item.Checked);
@@ -104,9 +128,8 @@ Example: taskbar.exe D:\tools\ss-local.exe -c D:\tools\ss-config.json", "Usage",
             _notifyIcon.ContextMenuStrip = contextMenu;
             _notifyIcon.DoubleClick += (s, e) =>
             {
-                itemShowlog.PerformClick();
+                itemShowErr.PerformClick();
             };
-
             Application.Run();
 
             _notifyIcon.Visible = false;
